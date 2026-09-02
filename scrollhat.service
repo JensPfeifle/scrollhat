@@ -1,0 +1,30 @@
+[Unit]
+Description=Scroll pHAT HD display for the Marax espresso machine
+Documentation=https://github.com/JensPfeifle/scrollhat
+# The MQTT broker lives on the LAN, so wait for a routable address.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jens
+Group=jens
+# gpiozero/lgpio need /dev/gpiochip*, scrollphathd needs /dev/i2c-1.
+SupplementaryGroups=gpio i2c
+
+WorkingDirectory=/home/jens/git/scrollhat
+ExecStart=/home/jens/git/scrollhat/.venv/bin/scrollhat
+
+# Keep print() output flowing into the journal instead of sitting in a pipe buffer.
+Environment=PYTHONUNBUFFERED=1
+
+# The broker may still be down at boot; connect() raises and the process exits.
+Restart=always
+RestartSec=5
+
+# main() traps SIGTERM, blanks the display and releases the GPIO pins.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

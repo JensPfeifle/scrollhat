@@ -1,13 +1,21 @@
 import json
+import signal
 import time
-from threading import Thread
+from threading import Event
 
 import paho.mqtt.client as mqtt
 import scrollphathd
 from gpiozero import Button
 
+MQTT_HOST = "10.0.1.178"
+MQTT_PORT = 1883
+MQTT_KEEPALIVE = 60
+
 machine_state = {"status": "off"}
 shot_state = {"active": False}
+
+# Set by SIGTERM/SIGINT so the render loop can unwind and blank the display.
+stop = Event()
 
 
 def on_connect(client, userdata, flags, rc):
@@ -29,17 +37,10 @@ def on_message(client, userdata, msg):
         shot_state = payload
 
 
-client = mqtt.Client()
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
 client.on_connect = on_connect
 client.on_message = on_message
 
-client.connect("10.0.1.178", 1883, 60)
-
-t2 = Thread(target=client.loop_forever)
-t2.start()
-
-
-scrollphathd.set_brightness(0.5)
 width, height = 17, 7
 
 button_map = {
@@ -48,11 +49,6 @@ button_map = {
     16: ("X", 16, 0),  # Top Right
     24: ("Y", 16, 7),  # Buttom Right
 }
-
-button_a = Button(5)
-button_b = Button(6)
-button_x = Button(16)
-button_y = Button(24)
 
 splash_origin = (0, 0)
 
@@ -119,15 +115,29 @@ def render_shot():
     scrollphathd.write_string(f":{duration:02d}", x=1)
 
 
+def request_stop(signum, frame):
+    print(f"Received signal {signum}, shutting down")
+    stop.set()
+
+
 def main() -> None:
+    # systemd stops the unit with SIGTERM, so both signals have to unwind cleanly.
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+
+    client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
+    # loop_start runs the network loop on a daemon thread, so a failure to stop
+    # it cannot keep the process alive past shutdown.
+    client.loop_start()
+
+    scrollphathd.set_brightness(0.5)
+
+    buttons = [Button(pin) for pin in button_map]
+    for button in buttons:
+        button.when_pressed = pressed
 
     try:
-        button_a.when_pressed = pressed
-        button_b.when_pressed = pressed
-        button_x.when_pressed = pressed
-        button_y.when_pressed = pressed
-
-        while True:
+        while not stop.is_set():
             scrollphathd.clear()
             if machine_state == {}:
                 print("Waiting for machine state...")
@@ -136,20 +146,15 @@ def main() -> None:
                 render_shot()
             elif machine_state["status"] in {"heating", "ready"}:
                 render_heating()
-            else:
-                scrollphathd.clear()
-                scrollphathd.show()
-                # empty state
-                continue
+            # any other status leaves the display blank
+
             scrollphathd.show()
-            time.sleep(1.0 / 60.0)
-
-    except KeyboardInterrupt:
-        button_a.close()
-        button_b.close()
-        button_x.close()
-        button_y.close()
-
-
-t = Thread(target=main)
-t.start()
+            # Doubles as the frame delay and wakes immediately on a signal.
+            stop.wait(1.0 / 60.0)
+    finally:
+        for button in buttons:
+            button.close()
+        client.loop_stop()
+        client.disconnect()
+        scrollphathd.clear()
+        scrollphathd.show()
