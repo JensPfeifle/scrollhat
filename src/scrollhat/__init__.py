@@ -18,8 +18,8 @@ shot_state = {"active": False}
 stop = Event()
 
 
-def on_connect(client, userdata, flags, rc):
-    print("Connected with result code " + str(rc))
+def on_connect(client, userdata, flags, reason_code, properties):
+    print("Connected with result code " + str(reason_code))
     client.subscribe("marax/#")
 
 
@@ -37,7 +37,7 @@ def on_message(client, userdata, msg):
         shot_state = payload
 
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect
 client.on_message = on_message
 
