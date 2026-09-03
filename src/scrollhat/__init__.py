@@ -158,3 +158,6 @@ def main() -> None:
         client.disconnect()
         scrollphathd.clear()
         scrollphathd.show()
+
+if __name__ == "__main__":
+	main()
