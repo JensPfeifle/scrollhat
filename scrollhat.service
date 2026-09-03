@@ -13,7 +13,7 @@ Group=jens
 SupplementaryGroups=gpio i2c
 
 WorkingDirectory=/home/jens/git/scrollhat
-ExecStart=/home/jens/git/scrollhat/.venv/bin/scrollhat
+ExecStart=python3 ./src/scrollhat/__init__.py
 
 # Keep print() output flowing into the journal instead of sitting in a pipe buffer.
 Environment=PYTHONUNBUFFERED=1
