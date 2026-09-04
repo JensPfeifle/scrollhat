@@ -7,7 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "basedpyright>=1.39.10",
     "gpiozero>=2.0.1.post3",
-    "lgpio>=0.2.2.0",
+    # Pi-only: lgpio needs linux/gpio.h, so it cannot build on a dev machine.
+    "lgpio>=0.2.2.0 ; sys_platform == 'linux'",
     "paho-mqtt>=2.1.0",
     "scrollphathd",
     "six>=1.17.0",
@@ -15,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 scrollhat = "scrollhat:main"
+scrollhat-sim = "scrollhat.simulator.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]

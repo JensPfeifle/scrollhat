@@ -343,7 +343,7 @@ source = { editable = "." }
 dependencies = [
     { name = "basedpyright" },
     { name = "gpiozero" },
-    { name = "lgpio" },
+    { name = "lgpio", marker = "sys_platform == 'linux'" },
     { name = "paho-mqtt" },
     { name = "scrollphathd" },
     { name = "six" },
@@ -359,7 +359,7 @@ dev = [
 requires-dist = [
     { name = "basedpyright", specifier = ">=1.39.10" },
     { name = "gpiozero", specifier = ">=2.0.1.post3" },
-    { name = "lgpio", specifier = ">=0.2.2.0" },
+    { name = "lgpio", marker = "sys_platform == 'linux'", specifier = ">=0.2.2.0" },
     { name = "paho-mqtt", specifier = ">=2.1.0" },
     { name = "scrollphathd", git = "https://github.com/JensPfeifle/scroll-phat-hd.git?subdirectory=library" },
     { name = "six", specifier = ">=1.17.0" },

@@ -53,15 +53,64 @@ uv run ruff format .
 
 The `examples/` directory holds standalone scripts from the Pimoroni library
 (scrolling text, fonts, button splash) plus `src/scrollhat/clock.py` and
-`rdy.py`, which are scratch sketches for display layouts. Run them directly:
+`rdy.py`, which are scratch sketches for display layouts. On the Pi, run them
+directly:
 
 ```bash
 uv run python examples/example.py
 ```
 
-Note that the hardware libraries (`scrollphathd`, `gpiozero`, `lgpio`) only
-work on the Pi itself — there is no simulator, so develop against the real
-device (e.g. over SSH).
+Off the Pi, run them under the simulator instead (see below). `lgpio` is
+declared Pi-only in `pyproject.toml`, so `uv sync` works on a laptop too.
+
+## Simulator
+
+`scrollhat.simulator` draws the 17x7 matrix in the terminal, so display code
+can be developed without the hardware:
+
+```bash
+uv run scrollhat-sim                     # built-in demo
+uv run scrollhat-sim examples/example.py # a script
+uv run scrollhat-sim -m scrollhat        # the app itself
+```
+
+The panel repaints in place and anything the program prints scrolls above it.
+The **a**, **b**, **x** and **y** keys press the corresponding buttons; the
+status line under the panel shows which are down (upper-case = pressed), and
+holding a key holds the button. Ctrl-C still quits.
+
+Useful flags: `--scale N` (terminal columns per LED, default 2), `--plain`
+(ASCII, no colour — also used automatically when stdout is not a terminal),
+`--no-status`, `--no-keys` and `--real-gpio`.
+
+It works by putting a fake `smbus2` module into `sys.modules` before
+`scrollphathd` imports it. The unmodified library then talks to a simulated
+IS31FL3731, and the register writes are decoded back into pixels — so gamma,
+global brightness, scroll, rotation and flips all behave exactly as they do on
+the real panel. To drive it from your own script:
+
+```python
+from scrollhat import simulator
+
+simulator.install()  # must happen before the first scrollphathd.show()
+
+import scrollphathd
+scrollphathd.write_string("hello")
+scrollphathd.show()
+```
+
+`gpiozero` is pointed at its mock pin factory (`GPIOZERO_PIN_FACTORY=mock`), so
+scripts that construct `Button`s import and run, and a keypress drives the mock
+pin for that button's GPIO (A=5, B=6, X=16, Y=24) — `when_pressed`,
+`when_released` and `is_pressed` all behave as they do on the Pi. Pass
+`--real-gpio` to keep whatever factory is configured, or `--no-keys` to leave
+the keyboard alone. Note that in `scrollhat` itself the buttons publish to
+`marax/control`, so pressing a or b under the simulator really does switch the
+machine on or off.
+
+MQTT is not simulated either: `uv run scrollhat-sim -m scrollhat` still
+connects to the broker in `MQTT_HOST`, which has to be reachable from the dev
+machine (or repointed at a local `mosquitto`).
 
 ## Installing the systemd service
 
