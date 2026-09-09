@@ -67,12 +67,16 @@ shot_end: time.time or None = None
 # spells the reading out. Button A swaps between them.
 DISPLAY_MODES = ("bar", "value")
 display_mode = DISPLAY_MODES[0]
+# When the last swap happened, so the render loop can wipe the new mode in.
+# Starts one wipe in the past: nothing to sweep in before the first press.
+mode_changed_at = -rdy.WIPE_SECONDS
 
 
 def toggle_display_mode():
-    global display_mode
+    global display_mode, mode_changed_at
     next_index = (DISPLAY_MODES.index(display_mode) + 1) % len(DISPLAY_MODES)
     display_mode = DISPLAY_MODES[next_index]
+    mode_changed_at = time.monotonic()
     print(f"Display mode: {display_mode}")
 
 
@@ -132,6 +136,10 @@ def main() -> None:
                         boost=machine_state["boost"],
                     )
             # any other status leaves the display blank
+
+            progress = (time.monotonic() - mode_changed_at) / rdy.WIPE_SECONDS
+            if progress < 1.0:
+                rdy.wipe(progress)
 
             scrollphathd.show()
             # Doubles as the frame delay and wakes immediately on a signal.
