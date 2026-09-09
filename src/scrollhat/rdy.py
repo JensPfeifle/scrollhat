@@ -9,8 +9,6 @@ scrollphathd.set_brightness(0.5)
 
 WIDTH, HEIGHT = 17, 7
 
-# Seconds the leading column of the heating bar spends on, then off.
-BLINK_SECONDS = 1.0
 # Seconds for the sheen to sweep the length of the heating bar.
 SHEEN_SECONDS = 2.5
 # Columns the sheen spreads either side of its centre.
@@ -42,14 +40,11 @@ def heating(value: int):
     w = (value - 10) // 5
 
     # Draws one frame and returns, so a caller running a render loop stays
-    # responsive; the blink comes from the clock rather than from sleeping.
-    lit = int(time.monotonic() / BLINK_SECONDS) % 2 == 1
-
+    # responsive; the animation comes from the clock rather than from sleeping.
     scrollphathd.clear()
     scrollphathd.fill(1.0, 0, 0, 17, 1)
     scrollphathd.fill(1.0, 0, 1, w, 5)
     scrollphathd.fill(1.0, 0, 6, 17, 1)
-    scrollphathd.fill(0.5 if lit else 0, w, 1, 1, 5)
     _sheen(w)
     scrollphathd.show()
 
