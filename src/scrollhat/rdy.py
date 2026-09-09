@@ -23,6 +23,10 @@ GLOW_SECONDS = 2.0
 DRIP_SECONDS = 1.4
 # Seconds a mode-change wipe takes to cross the display.
 WIPE_SECONDS = 0.35
+# Seconds the power-on line takes to draw across, then to open vertically.
+SCAN_SECONDS = 0.30
+OPEN_SECONDS = 0.20
+POWER_SECONDS = SCAN_SECONDS + OPEN_SECONDS
 
 
 def _wave(period: float, phase: float = 0.0) -> float:
@@ -121,6 +125,33 @@ def wipe(progress: float):
         scrollphathd.fill(1.0, edge, 0, 1, HEIGHT)
 
 
+def power_on(progress: float):
+    """Wake the display: a line draws left to right, then opens vertically.
+
+    `progress` runs 0.0 to 1.0 over POWER_SECONDS; at 1.0 the panel is fully
+    lit and the caller can take over with real content.
+    """
+    progress = min(max(progress, 0.0), 1.0)
+    scan = SCAN_SECONDS / POWER_SECONDS
+    middle = HEIGHT // 2
+
+    scrollphathd.clear()
+    if progress < scan:
+        width = int(round(progress / scan * WIDTH))
+        if width:
+            scrollphathd.fill(1.0, 0, middle, width, 1)
+    else:
+        # Opens symmetrically about the line, so the panel unfolds from it.
+        half = int(round((progress - scan) / (1.0 - scan) * middle))
+        scrollphathd.fill(1.0, 0, middle - half, WIDTH, 2 * half + 1)
+    scrollphathd.show()
+
+
+def power_off(progress: float):
+    """The same sweep run backwards, the way a CRT collapses to a line."""
+    power_on(1.0 - progress)
+
+
 def _demo(render, seconds: float, **kwargs):
     """Run one animated renderer at 60fps for a while."""
     end = time.monotonic() + seconds
@@ -129,14 +160,26 @@ def _demo(render, seconds: float, **kwargs):
         time.sleep(1.0 / 60.0)
 
 
+def _demo_power(render):
+    """Run one power sweep at 60fps."""
+    start = time.monotonic()
+    progress = 0.0
+    while progress < 1.0:
+        progress = min((time.monotonic() - start) / POWER_SECONDS, 1.0)
+        render(progress)
+        time.sleep(1.0 / 60.0)
+
+
 if __name__ == "__main__":
 
+    _demo_power(power_on)
     _demo(heating, 10.0, value=90)
     _demo(temperature, 3.0, value=93, heating=True)
     _demo(ready, 3.0)
     for n in range(28):
         _demo(shot, 1.0, timer=n)
     _demo(temperature, 5.0, value=93, heating=True, boost=True)
+    _demo_power(power_off)
 
     while True:
         time.sleep(10)

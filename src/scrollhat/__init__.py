@@ -116,16 +116,33 @@ def main() -> None:
     for button in buttons:
         button.when_pressed = pressed
 
+    # The display starts dark and sweeps on the first time the machine wakes.
+    awake = False
+    powered_at = -rdy.POWER_SECONDS
+
     try:
         while not stop.is_set():
             scrollphathd.clear()
             if machine_state == {}:
                 print("Waiting for machine state...")
 
-            if shot_state["active"]:
+            was_awake = awake
+            awake = machine_state.get("status") in {"heating", "ready"}
+            if awake != was_awake:
+                powered_at = time.monotonic()
+
+            power_progress = (time.monotonic() - powered_at) / rdy.POWER_SECONDS
+
+            if power_progress < 1.0:
+                # Sweeping on or collapsing off; the content waits its turn.
+                if awake:
+                    rdy.power_on(power_progress)
+                else:
+                    rdy.power_off(power_progress)
+            elif shot_state["active"]:
                 shot_timer = shot_state["timer"]
                 rdy.shot(timer=shot_timer)
-            elif machine_state["status"] in {"heating", "ready"}:
+            elif awake:
                 brew_temp = int(str(machine_state["brew_temp"]))
                 if display_mode == "bar":
                     rdy.heating(brew_temp)
@@ -135,7 +152,7 @@ def main() -> None:
                         heating=machine_state["heater"],
                         boost=machine_state["boost"],
                     )
-            # any other status leaves the display blank
+            # a machine that is off leaves the display blank
 
             progress = (time.monotonic() - mode_changed_at) / rdy.WIPE_SECONDS
             if progress < 1.0:
