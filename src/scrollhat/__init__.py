@@ -7,12 +7,22 @@ import paho.mqtt.client as mqtt
 import scrollphathd
 from gpiozero import Button
 
+
+from scrollhat import rdy
+
 MQTT_HOST = "10.0.1.178"
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
 
-machine_state = {"status": "off"}
-shot_state = {"active": False}
+machine_state = {
+    "status": "off",
+    "mode": "coffee",
+    "brew_temp": 20,
+    "steam_temp": 20,
+    "heater": False,
+    "boost": False,
+}
+shot_state = {"active": False, "timer": 0, "duration": 0}
 
 # Set by SIGTERM/SIGINT so the render loop can unwind and blank the display.
 stop = Event()
@@ -25,15 +35,13 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 def on_message(client, userdata, msg):
     global machine_state, shot_state
-    print(f"Topic: {msg.topic} | Message: {msg.payload.decode()}")
+    print(f"{msg.topic} | {msg.payload.decode()}")
     if msg.topic == "marax/machine":
         payload = json.loads(msg.payload.decode())
-        print(payload)
         machine_state = payload
 
     if msg.topic == "marax/shot":
         payload = json.loads(msg.payload.decode())
-        print(payload)
         shot_state = payload
 
 
@@ -44,13 +52,11 @@ client.on_message = on_message
 width, height = 17, 7
 
 button_map = {
-    5: ("A", 0, 0),  # Top Left
-    6: ("B", 0, 6),  # Bottom Left
-    16: ("X", 16, 0),  # Top Right
-    24: ("Y", 16, 7),  # Buttom Right
+    5: ("A"),  # Top Left
+    6: ("B"),  # Bottom Left
+    16: ("X"),  # Top Right
+    24: ("Y"),  # Buttom Right
 }
-
-splash_origin = (0, 0)
 
 state = "off"
 temperature = 0.0
@@ -59,55 +65,11 @@ shot_end: time.time or None = None
 
 
 def pressed(button):
-    button_name, x, y = button_map[button.pin.number]
-    if button_name == "A":
-        print("Off")
+    button_name = button_map[button.pin.number]
+    if button_name == "A" or button_name == "X":
         client.publish("marax/control", json.dumps({"state": "off"}))
-    if button_name == "B":
-        print("Heating...")
+    if button_name == "B" or button_name == "Y":
         client.publish("marax/control", json.dumps({"state": "on"}))
-
-
-def digit_square(brightness, x=0, y=0, value=0):
-    value = int(value)
-    if value == 0:
-        return
-    if value == 1:
-        scrollphathd.fill(brightness, x, y, width=1, height=1)
-    if value == 2:
-        scrollphathd.fill(brightness, x, y, width=2, height=1)
-    if value == 3:
-        scrollphathd.fill(brightness, x, y, width=3, height=1)
-    if value == 4:
-        scrollphathd.fill(brightness, x, y, width=3, height=1)
-        scrollphathd.fill(brightness, x, y + 1, width=1, height=1)
-    if value == 5:
-        scrollphathd.fill(brightness, x, y, width=3, height=1)
-        scrollphathd.fill(brightness, x, y + 1, width=2, height=1)
-    if value == 6:
-        scrollphathd.fill(brightness, x, y, width=3, height=2)
-    if value == 7:
-        scrollphathd.fill(brightness, x, y, width=3, height=2)
-        scrollphathd.fill(brightness, x, y + 2, width=1, height=1)
-    if value == 8:
-        scrollphathd.fill(brightness, x, y, width=3, height=2)
-        scrollphathd.fill(brightness, x, y + 2, width=2, height=1)
-    if value == 9:
-        scrollphathd.fill(brightness, x, y, width=3, height=3)
-
-
-def render_heating():
-    temperature = int(machine_state["brew_temp"])
-    tens = temperature // 10
-    ones = temperature % 10
-    digit_square(1.0, value=tens)
-    digit_square(1.0, x=5, value=ones)
-
-    progress_width = int(temperature / 91 * 17)
-
-    scrollphathd.fill(1.0, 0, 4, width=progress_width, height=4)
-    if int(ones) % 2 == 0:
-        scrollphathd.fill(0.5, progress_width, 4, width=1, height=4)
 
 
 def render_shot():
@@ -143,9 +105,10 @@ def main() -> None:
                 print("Waiting for machine state...")
 
             if shot_state["active"]:
-                render_shot()
+                shot_timer = shot_state["timer"]
+                rdy.shot(timer=shot_timer)
             elif machine_state["status"] in {"heating", "ready"}:
-                render_heating()
+                rdy.heating(int(str(machine_state["brew_temp"])))
             # any other status leaves the display blank
 
             scrollphathd.show()
@@ -159,5 +122,6 @@ def main() -> None:
         scrollphathd.clear()
         scrollphathd.show()
 
+
 if __name__ == "__main__":
-	main()
+    main()
