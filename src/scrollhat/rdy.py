@@ -1,3 +1,11 @@
+"""Frames for the espresso machine display.
+
+Every renderer here only *draws* into the scrollphathd buffer; the caller
+calls `show()` once it has layered on whatever else the frame needs. Showing
+from inside a renderer would push the unfinished frame to the panel as well,
+and an overlay like `wipe()` would then flicker against it.
+"""
+
 import math
 import time
 
@@ -50,7 +58,6 @@ def heating(value: int):
     scrollphathd.fill(1.0, 0, 1, w, 5)
     scrollphathd.fill(1.0, 0, 6, 17, 1)
     _sheen(w)
-    scrollphathd.show()
 
 
 def _sheen(w: int):
@@ -74,7 +81,6 @@ def ready():
     scrollphathd.clear()
     # Glows gently rather than sitting there, so "ready" looks awake.
     scrollphathd.write_string("RDY", brightness=0.45 + 0.55 * _wave(GLOW_SECONDS))
-    scrollphathd.show()
 
 
 def temperature(value: int, heating: bool = False, boost: bool = False):
@@ -90,7 +96,6 @@ def temperature(value: int, heating: bool = False, boost: bool = False):
             # Boost is the impatient one: a fast flicker instead of a breath.
             flicker = int(time.monotonic() / BOOST_FLICKER_SECONDS) % 2
             scrollphathd.fill(1.0 if flicker else 0.35, 15, 5, 2, 2)
-    scrollphathd.show()
 
 
 def shot(timer: int = 0):
@@ -98,7 +103,6 @@ def shot(timer: int = 0):
     # The timer is 15 columns wide, which leaves the last one for the drip.
     scrollphathd.write_string(f":{timer:02d}")
     _drip(WIDTH - 1)
-    scrollphathd.show()
 
 
 def _drip(x: int):
@@ -144,7 +148,6 @@ def power_on(progress: float):
         # Opens symmetrically about the line, so the panel unfolds from it.
         half = int(round((progress - scan) / (1.0 - scan) * middle))
         scrollphathd.fill(1.0, 0, middle - half, WIDTH, 2 * half + 1)
-    scrollphathd.show()
 
 
 def power_off(progress: float):
@@ -157,6 +160,7 @@ def _demo(render, seconds: float, **kwargs):
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         render(**kwargs)
+        scrollphathd.show()
         time.sleep(1.0 / 60.0)
 
 
@@ -167,6 +171,7 @@ def _demo_power(render):
     while progress < 1.0:
         progress = min((time.monotonic() - start) / POWER_SECONDS, 1.0)
         render(progress)
+        scrollphathd.show()
         time.sleep(1.0 / 60.0)
 
 
