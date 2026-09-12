@@ -32,9 +32,14 @@ DRIP_SECONDS = 1.4
 # Seconds a mode-change wipe takes to cross the display.
 WIPE_SECONDS = 0.35
 # Seconds the power-on line takes to draw across, then to open vertically.
-SCAN_SECONDS = 0.30
-OPEN_SECONDS = 0.20
+SCAN_SECONDS = 0.40
+OPEN_SECONDS = 0.27
 POWER_SECONDS = SCAN_SECONDS + OPEN_SECONDS
+
+# As dark as a lit LED can go and still read as lit. The library gamma-corrects
+# on the way out, so a linear 0.3 leaves only a twentieth of the light of a
+# linear 1.0: anything that dips that low blinks off rather than dimming.
+DIM = 0.55
 
 
 def _wave(period: float, phase: float = 0.0) -> float:
@@ -49,14 +54,16 @@ def heating(value: int):
 
     value = max(value, 15)
     value = min(value, 100)
-    w = (value - 10) // 5
+    # 15-100C needs 18 columns at 5C each, one more than there is, so the top
+    # of the range shares the last column rather than drawing off the panel.
+    w = min((value - 10) // 5, WIDTH)
 
     # Draws one frame and returns, so a caller running a render loop stays
     # responsive; the animation comes from the clock rather than from sleeping.
     scrollphathd.clear()
-    scrollphathd.fill(1.0, 0, 0, 17, 1)
-    scrollphathd.fill(1.0, 0, 1, w, 5)
-    scrollphathd.fill(1.0, 0, 6, 17, 1)
+    scrollphathd.fill(1.0, 0, 0, WIDTH, 1)
+    scrollphathd.fill(1.0, 0, 1, w, HEIGHT - 2)
+    scrollphathd.fill(1.0, 0, HEIGHT - 1, WIDTH, 1)
     _sheen(w)
 
 
@@ -91,11 +98,11 @@ def temperature(value: int, heating: bool = False, boost: bool = False):
         scrollphathd.write_string(f"{value:02d}°")
         if heating:
             # Breathes while the element is on.
-            scrollphathd.fill(0.3 + 0.7 * _wave(BREATH_SECONDS), 12, 5, 2, 2)
+            scrollphathd.fill(DIM + (1.0 - DIM) * _wave(BREATH_SECONDS), 12, 5, 2, 2)
         if boost:
             # Boost is the impatient one: a fast flicker instead of a breath.
             flicker = int(time.monotonic() / BOOST_FLICKER_SECONDS) % 2
-            scrollphathd.fill(1.0 if flicker else 0.35, 15, 5, 2, 2)
+            scrollphathd.fill(1.0 if flicker else DIM, 15, 5, 2, 2)
 
 
 def shot(timer: int = 0):
@@ -130,24 +137,36 @@ def wipe(progress: float):
 
 
 def power_on(progress: float):
-    """Wake the display: a line draws left to right, then opens vertically.
+    """Wake the display: a beam draws left to right, then opens vertically.
 
-    `progress` runs 0.0 to 1.0 over POWER_SECONDS; at 1.0 the panel is fully
-    lit and the caller can take over with real content.
+    A mask over whatever the caller drew, like `wipe()`, so the picture unfolds
+    from the beam. Lighting every LED instead and cutting to the content at the
+    end flashes the whole panel white. `progress` runs 0.0 to 1.0 over
+    POWER_SECONDS; at 1.0 nothing is masked and the frame is the caller's own.
     """
     progress = min(max(progress, 0.0), 1.0)
     scan = SCAN_SECONDS / POWER_SECONDS
     middle = HEIGHT // 2
 
-    scrollphathd.clear()
     if progress < scan:
+        # None of the picture yet: just the beam drawing itself across.
+        scrollphathd.clear()
         width = int(round(progress / scan * WIDTH))
         if width:
             scrollphathd.fill(1.0, 0, middle, width, 1)
-    else:
-        # Opens symmetrically about the line, so the panel unfolds from it.
-        half = int(round((progress - scan) / (1.0 - scan) * middle))
-        scrollphathd.fill(1.0, 0, middle - half, WIDTH, 2 * half + 1)
+        return
+
+    # The two halves of the beam travel out past the edges, so the last frame
+    # of the sweep is the picture with nothing left drawn over it.
+    half = int(round((progress - scan) / (1.0 - scan) * (middle + 1)))
+    top, bottom = middle - half, middle + half
+    if top > 0:
+        scrollphathd.clear_rect(0, 0, WIDTH, top)
+    if bottom < HEIGHT - 1:
+        scrollphathd.clear_rect(0, bottom + 1, WIDTH, HEIGHT - bottom - 1)
+    for y in (top, bottom):
+        if 0 <= y < HEIGHT:
+            scrollphathd.fill(1.0, 0, y, WIDTH, 1)
 
 
 def power_off(progress: float):
@@ -164,12 +183,14 @@ def _demo(render, seconds: float, **kwargs):
         time.sleep(1.0 / 60.0)
 
 
-def _demo_power(render):
-    """Run one power sweep at 60fps."""
+def _demo_power(render, under, **kwargs):
+    """Run one power sweep at 60fps over the frame it reveals or collapses."""
     start = time.monotonic()
     progress = 0.0
     while progress < 1.0:
         progress = min((time.monotonic() - start) / POWER_SECONDS, 1.0)
+        scrollphathd.clear()
+        under(**kwargs)
         render(progress)
         scrollphathd.show()
         time.sleep(1.0 / 60.0)
@@ -177,14 +198,14 @@ def _demo_power(render):
 
 if __name__ == "__main__":
 
-    _demo_power(power_on)
+    _demo_power(power_on, heating, value=90)
     _demo(heating, 10.0, value=90)
     _demo(temperature, 3.0, value=93, heating=True)
     _demo(ready, 3.0)
     for n in range(28):
         _demo(shot, 1.0, timer=n)
     _demo(temperature, 5.0, value=93, heating=True, boost=True)
-    _demo_power(power_off)
+    _demo_power(power_off, temperature, value=93, heating=True, boost=True)
 
     while True:
         time.sleep(10)

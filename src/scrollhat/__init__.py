@@ -132,17 +132,20 @@ def main() -> None:
                 powered_at = time.monotonic()
 
             power_progress = (time.monotonic() - powered_at) / rdy.POWER_SECONDS
+            sweeping = power_progress < 1.0
 
-            if power_progress < 1.0:
-                # Sweeping on or collapsing off; the content waits its turn.
-                if awake:
-                    rdy.power_on(power_progress)
-                else:
-                    rdy.power_off(power_progress)
-            elif shot_state["active"]:
+            # Whether the brew temperature is the thing on screen, which is the
+            # only time a swap between its two styles is worth sweeping in.
+            showing_brew = False
+
+            if shot_state["active"] and not sweeping:
                 shot_timer = shot_state["timer"]
                 rdy.shot(timer=shot_timer)
-            elif awake:
+            elif awake or sweeping:
+                # Drawn during a sweep too, including the collapse of a machine
+                # that has just gone off: the sweep masks the picture, so it
+                # unfolds from the beam rather than flashing the panel white.
+                showing_brew = True
                 brew_temp = int(str(machine_state["brew_temp"]))
                 if display_mode == "bar":
                     rdy.heating(brew_temp)
@@ -154,9 +157,16 @@ def main() -> None:
                     )
             # a machine that is off leaves the display blank
 
-            progress = (time.monotonic() - mode_changed_at) / rdy.WIPE_SECONDS
-            if progress < 1.0:
-                rdy.wipe(progress)
+            if sweeping:
+                # One overlay at a time: a mode swap mid-sweep arrives with it.
+                if awake:
+                    rdy.power_on(power_progress)
+                else:
+                    rdy.power_off(power_progress)
+            elif showing_brew:
+                progress = (time.monotonic() - mode_changed_at) / rdy.WIPE_SECONDS
+                if progress < 1.0:
+                    rdy.wipe(progress)
 
             scrollphathd.show()
             # Doubles as the frame delay and wakes immediately on a signal.
