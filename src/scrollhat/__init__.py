@@ -1,7 +1,7 @@
 import json
 import signal
 import time
-from threading import Event
+from threading import Event, Thread
 
 import paho.mqtt.client as mqtt
 import scrollphathd
@@ -12,6 +12,15 @@ import rdy
 MQTT_HOST = "10.0.1.178"
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
+# How long to wait before picking the MQTT client back up after it has fallen
+# over. Long enough not to spin against a broker that is down, short enough
+# that a machine switched on in the meantime still lights the display.
+MQTT_RETRY_SECONDS = 5.0
+
+# The keys each renderer reads. A payload that arrives without them is dropped
+# rather than left to raise a KeyError in the render loop.
+MACHINE_KEYS = {"status", "brew_temp", "heater", "boost"}
+SHOT_KEYS = {"active", "timer"}
 
 machine_state = {
     "status": "off",
@@ -33,15 +42,43 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 
 def on_message(client, userdata, msg):
-    global machine_state, shot_state
-    print(f"{msg.topic} | {msg.payload.decode()}")
-    if msg.topic == "marax/machine":
-        payload = json.loads(msg.payload.decode())
-        machine_state = payload
+    """Take in one reading. Nothing here may raise.
 
-    if msg.topic == "marax/shot":
-        payload = json.loads(msg.payload.decode())
-        shot_state = payload
+    paho runs this on its network thread and does not catch what it throws, so
+    an exception here takes the whole MQTT connection down with it — and the
+    machine does send the occasional garbled payload.
+    """
+    global machine_state, shot_state
+    try:
+        # The machine's serial link drops the odd byte, so a payload can arrive
+        # truncated or with stray control characters in it. Decode leniently,
+        # print what came in, and let the JSON parse be the thing that judges it.
+        text = msg.payload.decode(errors="replace")
+        print(f"{msg.topic} | {text}")
+
+        if msg.topic not in {"marax/machine", "marax/shot"}:
+            return
+
+        try:
+            # strict=False tolerates control characters inside strings; a
+            # payload mangled any worse than that still fails to parse.
+            payload = json.loads(text, strict=False)
+        except ValueError as error:
+            print(f"Dropped unparseable {msg.topic} payload: {error}")
+            return
+
+        wanted = MACHINE_KEYS if msg.topic == "marax/machine" else SHOT_KEYS
+        if not isinstance(payload, dict) or not wanted <= payload.keys():
+            print(f"Dropped incomplete {msg.topic} payload: {payload!r}")
+            return
+
+        if msg.topic == "marax/machine":
+            machine_state = payload
+        else:
+            shot_state = payload
+    except Exception as error:
+        # Whatever it was, the connection is worth more than this message.
+        print(f"Error handling {msg.topic}: {error!r}")
 
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
@@ -126,6 +163,26 @@ def render_shot():
     scrollphathd.write_string(f":{duration:02d}", x=1)
 
 
+def mqtt_forever():
+    """Run the MQTT client, standing it back up whenever it falls over.
+
+    `loop_forever` reconnects on its own when the broker or the network goes
+    away, but it returns — or throws — if anything else goes wrong, and before
+    this the client stayed down for good once that happened.
+    """
+    while not stop.is_set():
+        try:
+            client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
+            client.loop_forever()
+        except Exception as error:
+            print(f"MQTT client stopped: {error!r}")
+        else:
+            print("MQTT client stopped")
+        if not stop.is_set():
+            print(f"Reconnecting in {MQTT_RETRY_SECONDS:.0f}s")
+            stop.wait(MQTT_RETRY_SECONDS)
+
+
 def request_stop(signum, frame):
     print(f"Received signal {signum}, shutting down")
     stop.set()
@@ -138,10 +195,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
-    client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
-    # loop_start runs the network loop on a daemon thread, so a failure to stop
-    # it cannot keep the process alive past shutdown.
-    client.loop_start()
+    # A daemon thread, so a network loop that refuses to stop cannot keep the
+    # process alive past shutdown. The display runs with or without a broker:
+    # connecting is the thread's business, not something to block the boot on.
+    mqtt_thread = Thread(target=mqtt_forever, name="mqtt", daemon=True)
+    mqtt_thread.start()
 
     scrollphathd.set_brightness(0.5)
 
@@ -211,8 +269,9 @@ def main() -> None:
     finally:
         for button in buttons:
             button.close()
-        client.loop_stop()
+        # `stop` is set by now, so the loop returns and the thread unwinds.
         client.disconnect()
+        mqtt_thread.join(timeout=2.0)
         scrollphathd.clear()
         scrollphathd.show()
 
