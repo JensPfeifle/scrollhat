@@ -7,8 +7,7 @@ import paho.mqtt.client as mqtt
 import scrollphathd
 from gpiozero import Button
 
-
-from scrollhat import rdy
+import rdy
 
 MQTT_HOST = "10.0.1.178"
 MQTT_PORT = 1883
@@ -85,9 +84,9 @@ def pressed(button):
     if button_name == "A":
         toggle_display_mode()
     if button_name == "X":
-        client.publish("marax/control", json.dumps({"state": "off"}))
-    if button_name == "B" or button_name == "Y":
         client.publish("marax/control", json.dumps({"state": "on"}))
+    if button_name == "Y":
+        client.publish("marax/control", json.dumps({"state": "off"}))
 
 
 def render_shot():

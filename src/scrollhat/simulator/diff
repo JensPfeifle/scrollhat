@@ -1,0 +1,33 @@
+diff --git a/scrollhat.service b/scrollhat.service
+index 2cec262..767951b 100644
+--- a/scrollhat.service
++++ b/scrollhat.service
+@@ -12,7 +12,7 @@ Group=jens
+ # gpiozero/lgpio need /dev/gpiochip*, scrollphathd needs /dev/i2c-1.
+ SupplementaryGroups=gpio i2c
+
+-WorkingDirectory=/home/jens/git/scrollhat
++WorkingDirectory=/home/jens/scrollhat
+ ExecStart=python3 ./src/scrollhat/__init__.py
+
+ # Keep print() output flowing into the journal instead of sitting in a pipe buffer.
+diff --git a/src/scrollhat/__init__.py b/src/scrollhat/__init__.py
+index f646b8a..1797d35 100644
+--- a/src/scrollhat/__init__.py
++++ b/src/scrollhat/__init__.py
+@@ -7,8 +7,7 @@ import paho.mqtt.client as mqtt
+ import scrollphathd
+ from gpiozero import Button
+
+-
+-from scrollhat import rdy
++import rdy
+
+ MQTT_HOST = "10.0.1.178"
+ MQTT_PORT = 1883
+@@ -85,9 +84,9 @@ def pressed(button):
+     if button_name == "A":
+         toggle_display_mode()
+     if button_name == "X":
+-        client.publish("marax/control", json.dumps({"state": "off"}))
+-    if button_name == "B" or button_name == "Y":
