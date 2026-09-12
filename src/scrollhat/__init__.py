@@ -66,7 +66,11 @@ shot_end: time.time or None = None
 # spells the reading out. Button A swaps between them.
 DISPLAY_MODES = ("bar", "value")
 display_mode = DISPLAY_MODES[0]
-# When the last swap happened, so the render loop can wipe the new mode in.
+# What a running shot puts on screen: its timer, or the brew temperature
+# spelled out. Button A swaps between those while the shot lasts.
+SHOT_VIEWS = ("timer", "temperature")
+shot_view = SHOT_VIEWS[0]
+# When the last swap happened, so the render loop can wipe the new view in.
 # Starts one wipe in the past: nothing to sweep in before the first press.
 mode_changed_at = -rdy.WIPE_SECONDS
 
@@ -79,10 +83,38 @@ def toggle_display_mode():
     print(f"Display mode: {display_mode}")
 
 
+def toggle_shot_view():
+    global shot_view, mode_changed_at
+    next_index = (SHOT_VIEWS.index(shot_view) + 1) % len(SHOT_VIEWS)
+    shot_view = SHOT_VIEWS[next_index]
+    mode_changed_at = time.monotonic()
+    print(f"Shot view: {shot_view}")
+
+
+def render_temperature():
+    rdy.temperature(
+        int(str(machine_state["brew_temp"])),
+        heating=machine_state["heater"],
+        boost=machine_state["boost"],
+    )
+
+
+def render_brew():
+    if display_mode == "bar":
+        rdy.heating(int(str(machine_state["brew_temp"])))
+    else:
+        render_temperature()
+
+
 def pressed(button):
     button_name = button_map[button.pin.number]
     if button_name == "A":
-        toggle_display_mode()
+        # A shot owns the display while it runs, so A swaps what it shows;
+        # the rest of the time it swaps how the brew temperature is drawn.
+        if shot_state["active"]:
+            toggle_shot_view()
+        else:
+            toggle_display_mode()
     if button_name == "X":
         client.publish("marax/control", json.dumps({"state": "on"}))
     if button_name == "Y":
@@ -100,6 +132,8 @@ def request_stop(signum, frame):
 
 
 def main() -> None:
+    global shot_view
+
     # systemd stops the unit with SIGTERM, so both signals have to unwind cleanly.
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
@@ -118,6 +152,7 @@ def main() -> None:
     # The display starts dark and sweeps on the first time the machine wakes.
     awake = False
     powered_at = -rdy.POWER_SECONDS
+    shooting = False
 
     try:
         while not stop.is_set():
@@ -133,27 +168,30 @@ def main() -> None:
             power_progress = (time.monotonic() - powered_at) / rdy.POWER_SECONDS
             sweeping = power_progress < 1.0
 
-            # Whether the brew temperature is the thing on screen, which is the
-            # only time a swap between its two styles is worth sweeping in.
-            showing_brew = False
+            was_shooting = shooting
+            shooting = shot_state["active"]
+            if shooting and not was_shooting:
+                # Every shot opens on its timer, whatever the last one ended on.
+                shot_view = SHOT_VIEWS[0]
 
-            if shot_state["active"] and not sweeping:
-                shot_timer = shot_state["timer"]
-                rdy.shot(timer=shot_timer)
+            # Whether something button A swaps is on screen, which is the only
+            # time a swap is worth sweeping in.
+            swappable = False
+
+            if shooting and not sweeping:
+                swappable = True
+                if shot_view == "timer":
+                    rdy.shot(timer=shot_state["timer"])
+                else:
+                    # The reading itself, never the bar: mid-shot the number is
+                    # what is worth reading.
+                    render_temperature()
             elif awake or sweeping:
                 # Drawn during a sweep too, including the collapse of a machine
                 # that has just gone off: the sweep masks the picture, so it
                 # unfolds from the beam rather than flashing the panel white.
-                showing_brew = True
-                brew_temp = int(str(machine_state["brew_temp"]))
-                if display_mode == "bar":
-                    rdy.heating(brew_temp)
-                else:
-                    rdy.temperature(
-                        brew_temp,
-                        heating=machine_state["heater"],
-                        boost=machine_state["boost"],
-                    )
+                swappable = True
+                render_brew()
             # a machine that is off leaves the display blank
 
             if sweeping:
@@ -162,7 +200,7 @@ def main() -> None:
                     rdy.power_on(power_progress)
                 else:
                     rdy.power_off(power_progress)
-            elif showing_brew:
+            elif swappable:
                 progress = (time.monotonic() - mode_changed_at) / rdy.WIPE_SECONDS
                 if progress < 1.0:
                     rdy.wipe(progress)
